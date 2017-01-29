@@ -1,7 +1,9 @@
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
@@ -23,9 +25,9 @@ import org.w3c.dom.ls.LSInput;
 public class Peer {
 	static Map<String, String> listShareFile = new HashMap<>();
 	static Set<String> shareFileList = new HashSet<>();
-
 	
 	public static void main(String[] args) throws IOException {
+		
 		final String IndexServerName = "IndexServer";
 		final int portNumber = Integer.parseInt(args[1]);
 		final String peerHost = args[0];
@@ -36,13 +38,26 @@ public class Peer {
 
 		final String FILE_LOC_URL = "" + InetAddress.getLocalHost().getHostAddress() + ":" + listnPeerPort + "/"
 				+ peerName + "";
-
+		File perfEval = null ;
+		
+		try {
+			 perfEval = new File(System.getProperty("user.dir") + "/" + peerName + "/" + "perfEval.csv");
+			if (perfEval.exists()){
+				System.out.println("file exsist" + perfEval.getPath());
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+			System.out.println("Error while creating csv file");
+		}	
+		final BufferedWriter  pefFileWriter = new BufferedWriter(new FileWriter(perfEval, true));
+		pefFileWriter.write("PeerName,File Request,IndexServer Resp Time,FileRequested Peer, FileDownload Time, FileSize");
+		pefFileWriter.newLine();
 		
 		Thread peerThread = new Thread(new Runnable() {
+			
 			@Override
 			public void run() {
-				// String IserverName = "rmi://localhost:1099/IndexServer";
-
+				
 				try {
 					Registry registry = LocateRegistry.getRegistry(peerHost, portNumber);
 					IIndexServer serverObject = (IIndexServer) registry.lookup(IndexServerName);
@@ -50,18 +65,17 @@ public class Peer {
 					if (serverObject != null) {
 						System.out.println("Lookup success. Can talk with server now");
 					}
-
+					
 					this.initPeer(peerName, serverObject);
 
 					int choice = 0;
 					boolean flgContinue = true;
 					System.out.println("Select from following option");
 					do {
-						System.out.println("1 : Share file on network ");
-						System.out.println("2 : remove file from network ");
-						System.out.println("3 : download file from network");
-						System.out.println("4 : Refresh share file info on the Index Server");
-						System.out.println("5 : Shutdown Peer");
+
+						System.out.println("1 : download file from network");
+						System.out.println("2 : Refresh share dirctory info on the Index Server");
+						System.out.println("3 : Shutdown Peer");
 						try {
 							choice = Integer.parseInt(br.readLine());
 						} catch (Exception e) {
@@ -70,18 +84,12 @@ public class Peer {
 						}
 						switch (choice) {
 						case 1:
-							this.registerFileOnNetwork(serverObject);
-							break;
-						case 2:
-							this.deregisterFileFromNetwork(serverObject);
-							break;
-						case 3:
 							this.downloadFileFromNetWork(serverObject);
 							break;
-						case 4:
+						case 2:
 							this.autoRegIndexServer(serverObject);
 							break;
-						case 5:
+						case 3:
 							System.out.println("Shutting down peer........");
 							this.autoDeRegIndexServer(serverObject);
 							System.exit(0);
@@ -114,7 +122,7 @@ public class Peer {
 				}
 
 			}
-			
+
 			public void deregisterFileFromNetwork(IIndexServer serverObject) {
 				System.out.println("Select the file you want to remove from share network");
 				try {
@@ -135,16 +143,24 @@ public class Peer {
 
 			public void downloadFileFromNetWork(IIndexServer serverObject) throws IOException {
 				int failCount = 0;
+				long startTime;
+				long endTime;
+				long repIndexServer;
+				long downloadTime;
 				System.out.println("Enter the file to download");
 				String fileName = br.readLine();
+				 startTime = System.currentTimeMillis();
 				List<String> peerList = this.searchFileOnNetWork(serverObject, fileName);
-				if (peerList == null) {
+				 endTime   = System.currentTimeMillis();
+				repIndexServer = endTime - startTime;
+				
+				if (peerList == null || peerList.size()==0) {
 					System.out.println("File not found on network");
 					return;
 				}
-				System.out.println("Peer list " + peerList);
+				System.out.println("\n List of available Peer list " + peerList);
 				Iterator<String> peerIt = peerList.iterator();
-
+				
 				while (peerIt.hasNext()) {
 					String peerLocStr = peerIt.next();
 					// 104.194.114.136:50002{peer1}
@@ -153,14 +169,20 @@ public class Peer {
 					String peerLooupPort = peerLocStr.substring(peerLocStr.indexOf(":") + 1, peerLocStr.indexOf("/"));
 					String peerLookupHost = peerLocStr.substring(0, peerLocStr.indexOf(":"));
 					try {
+						startTime = System.currentTimeMillis();
 						Registry registry = LocateRegistry.getRegistry(peerLookupHost, Integer.parseInt(peerLooupPort));
 						IPeer peer;
 						peer = (IPeer) registry.lookup(peerLookupName);
 						byte[] bufferData = peer.getFile(peerLookupName + "/" + fileName);
+						endTime   = System.currentTimeMillis();
 						if (!this.copyDataToLocalPeerFile(fileName, bufferData)) {
 							System.out.println("Error While copying file in local peer. Check file permission");
 						}
+						
 						System.out.println("File Copied successful: ");
+						downloadTime = endTime - startTime;
+					pefFileWriter.write(peerName+","+fileName+","+repIndexServer+","+peerLookupName+","+downloadTime+","+bufferData.length);
+					pefFileWriter.newLine();	
 						break;
 					} catch (NotBoundException e) {
 
@@ -176,6 +198,7 @@ public class Peer {
 
 					}
 				}
+				
 			}
 
 			public boolean copyDataToLocalPeerFile(String fileName, byte[] bufferData) {
@@ -202,8 +225,11 @@ public class Peer {
 						System.out.println("Failed to create directory!");
 					}
 				}
-				this.autoRegIndexServer(serverObject);
-				System.out.println();
+				System.out.println("Auto registration start");
+				if (this.autoRegIndexServer(serverObject))
+					System.out.println("Auto registration Ends successfully");
+				else
+					System.out.println("Error In auto register");
 			}
 
 			public boolean autoRegIndexServer(IIndexServer serverObject) {
@@ -243,9 +269,9 @@ public class Peer {
 				}
 
 				if (!shareFileList.isEmpty()) {
-					for (int i = 0; i < listFiles.length; i++){
+					for (int i = 0; i < listFiles.length; i++) {
 						curFileSet.add(listFiles[i].getName());
-					}	
+					}
 					Iterator<String> itList = shareFileList.iterator();
 					while (itList.hasNext()) {
 						String oldFileName = itList.next();
@@ -261,7 +287,7 @@ public class Peer {
 				}
 				return true;
 			}
-			
+
 			public boolean autoDeRegIndexServer(IIndexServer serverObject) {
 				File[] listFiles = new File(peerName).listFiles();
 				for (int i = 0; i < listFiles.length; i++) {
@@ -285,6 +311,7 @@ public class Peer {
 				if (System.getSecurityManager() == null) {
 					System.setSecurityManager(new SecurityManager());
 				}
+
 				IPeer listnPeer;
 				try {
 					listnPeer = new PeerImpl();
@@ -295,7 +322,7 @@ public class Peer {
 				}
 			}
 		});
-		
+
 		Thread updateDirThread = new Thread(new Runnable() {
 			@Override
 			public void run() {
@@ -327,7 +354,7 @@ public class Peer {
 					e.printStackTrace();
 				}
 			}
-			
+
 			public boolean autoRmvFlFrmIndexServer(IIndexServer serverObject) {
 				Set<String> curFileSet = new HashSet<>();
 				File[] listFiles = null;
@@ -339,9 +366,9 @@ public class Peer {
 				}
 
 				if (!shareFileList.isEmpty()) {
-					for (int i = 0; i < listFiles.length; i++){
+					for (int i = 0; i < listFiles.length; i++) {
 						curFileSet.add(listFiles[i].getName());
-					}	
+					}
 					Iterator<String> itList = shareFileList.iterator();
 					while (itList.hasNext()) {
 						String oldFileName = itList.next();
