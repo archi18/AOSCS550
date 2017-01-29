@@ -12,12 +12,17 @@ import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+
+import org.w3c.dom.ls.LSInput;
 
 public class Peer {
 	static Map<String, String> listShareFile = new HashMap<>();
+	static Set<String> shareFileList = new HashSet<>();
 
 	public static void main(String[] args) throws IOException {
 		final String IndexServerName = "IndexServer";
@@ -35,25 +40,25 @@ public class Peer {
 			@Override
 			public void run() {
 				// String IserverName = "rmi://localhost:1099/IndexServer";
-				
+
 				try {
 					Registry registry = LocateRegistry.getRegistry(peerHost, portNumber);
 					IIndexServer serverObject = (IIndexServer) registry.lookup(IndexServerName);
-					
+
 					if (serverObject != null) {
 						System.out.println("Lookup success. Can talk with server now");
 					}
 
 					this.initPeer(peerName, serverObject);
 
-					int choice=0;
+					int choice = 0;
 					boolean flgContinue = true;
 					System.out.println("Select from following option");
 					do {
 						System.out.println("1 : Share file on network ");
 						System.out.println("2 : remove file from network ");
 						System.out.println("3 : download file from network");
-						System.out.println("4 : Auto update the Index Server");
+						System.out.println("4 : Refresh share file info on the Index Server");
 						System.out.println("5 : Shutdown Peer");
 						try {
 							choice = Integer.parseInt(br.readLine());
@@ -86,7 +91,6 @@ public class Peer {
 						int ans = Integer.parseInt(br.readLine());
 						flgContinue = (ans == 0) ? false : true;
 					} while (flgContinue);
-					
 
 				} catch (Exception e) {
 					e.printStackTrace();
@@ -97,7 +101,8 @@ public class Peer {
 			public void registerFileOnNetwork(IIndexServer serverObject) {
 				String filePath = null;
 				try {
-					System.out.println("Enter the name of file to be shared. Make sure you put file in peername directory");
+					System.out.println(
+							"Enter the name of file to be shared. Make sure you put file in peername directory");
 					String shareFileName = br.readLine();
 					serverObject.register(shareFileName, FILE_LOC_URL);
 					listShareFile.put(shareFileName, filePath);
@@ -112,8 +117,10 @@ public class Peer {
 				System.out.println("Select the file you want to remove from share network");
 				try {
 					String fileName = br.readLine();
-					serverObject.deRegister(fileName, FILE_LOC_URL);
-					System.out.println("File Removed from newwork success");
+					if (!serverObject.deRegister(fileName, FILE_LOC_URL))
+						System.out.println("file not present on Index server. check name is correct");
+					else
+						System.out.println("File Removed from newwork success");
 				} catch (IOException e) {
 					e.printStackTrace();
 				}
@@ -194,25 +201,67 @@ public class Peer {
 					}
 				}
 				this.autoRegIndexServer(serverObject);
+				System.out.println();
 			}
 
 			public boolean autoRegIndexServer(IIndexServer serverObject) {
-				File[] listFiles = new File(peerName).listFiles();
+				File[] listFiles = null;
+				try {
+					listFiles = new File(peerName).listFiles();
+				} catch (Exception e) {
+					e.printStackTrace();
+					System.out.println("Error while reading file....");
+				}
 				for (int i = 0; i < listFiles.length; i++) {
 					if (listFiles[i].isFile()) {
 						try {
-							serverObject.register(listFiles[i].getName(), FILE_LOC_URL);
-							System.out.println("Automation update complete ");
+							if (!shareFileList.contains(listFiles[i].getName())) {
+								serverObject.register(listFiles[i].getName(), FILE_LOC_URL);
+								shareFileList.add(listFiles[i].getName());
+							}
 						} catch (RemoteException e) {
 							e.printStackTrace();
 							return false;
 						}
 					}
 				}
+				this.autoRmvFlFrmIndexServer(serverObject);
+				System.out.println("Auto update complete ");
+				return true;
+			}
+
+			public boolean autoRmvFlFrmIndexServer(IIndexServer serverObject) {
+				Set<String> curFileSet = new HashSet<>();
+				File[] listFiles = null;
+				try {
+					listFiles = new File(peerName).listFiles();
+				} catch (Exception e) {
+					e.printStackTrace();
+					System.out.println("Error while reading file....");
+				}
+
+				if (!shareFileList.isEmpty()) {
+					for (int i = 0; i < listFiles.length; i++)
+						curFileSet.add(listFiles[i].getName());
+
+					Iterator<String> itList = shareFileList.iterator();
+					while (itList.hasNext()) {
+						String oldFileName = itList.next();
+						if (!curFileSet.contains(oldFileName)) {
+							itList.remove();
+							try {
+								serverObject.deRegister(oldFileName, FILE_LOC_URL);
+							} catch (Exception e) {
+								System.out.println("Error while deregister");
+							}
+						}
+					}
+
+				}
 				return true;
 			}
 			
-			public boolean autoDeRegIndexServer(IIndexServer serverObject){
+			public boolean autoDeRegIndexServer(IIndexServer serverObject) {
 				File[] listFiles = new File(peerName).listFiles();
 				for (int i = 0; i < listFiles.length; i++) {
 					if (listFiles[i].isFile()) {
@@ -224,11 +273,9 @@ public class Peer {
 						}
 					}
 				}
-				System.out.println("Auto update complete ");
+
 				return true;
 			}
-			
-			
 
 		});
 
@@ -249,18 +296,18 @@ public class Peer {
 			}
 		});
 		
-		Thread updateDirThread=new Thread(new Runnable() {
+		Thread updateDirThread = new Thread(new Runnable() {
 			@Override
 			public void run() {
-				try{
+				try {
 					Registry registry = LocateRegistry.getRegistry(peerHost, portNumber);
 					IIndexServer serverObject = (IIndexServer) registry.lookup(IndexServerName);
-					
+
 					if (serverObject != null) {
 						System.out.println("Lookup success. Can talk with server now");
 					}
-					
-					while(true){
+
+					while (true) {
 						File[] listFiles = new File(peerName).listFiles();
 						for (int i = 0; i < listFiles.length; i++) {
 							if (listFiles[i].isFile()) {
@@ -268,19 +315,20 @@ public class Peer {
 									serverObject.register(listFiles[i].getName(), FILE_LOC_URL);
 								} catch (RemoteException e) {
 									e.printStackTrace();
-									
+
 								}
 							}
 						}
 						Thread.sleep(10000);
 					}
-					
-				}catch(Exception e){
+
+				} catch (Exception e) {
 					System.out.println("Exception in autoupdate directory thread ");
 					e.printStackTrace();
 				}
 			}
 		});
+
 		listingPeerThread.start();
 		peerThread.start();
 		updateDirThread.start();
