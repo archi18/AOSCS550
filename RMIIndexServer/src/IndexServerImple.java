@@ -58,7 +58,9 @@ public class IndexServerImple extends UnicastRemoteObject implements IIndexServe
 	public boolean deRegister(String fileName, String address) {
 		synchronized (peerFileMap) {
 			System.out.println("Remove file " + fileName + " address :: " + address);
-			List<String> peerList = peerFileMap.get(fileName);
+			List<String> peerList =peerFileMap.containsKey(fileName)? peerFileMap.get(fileName):null;
+			if(peerList==null)
+				return false;
 			Iterator<String> it = peerList.iterator();
 			while (it.hasNext()) {
 				String peerAdd = it.next();
