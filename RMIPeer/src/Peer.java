@@ -24,6 +24,7 @@ public class Peer {
 	static Map<String, String> listShareFile = new HashMap<>();
 	static Set<String> shareFileList = new HashSet<>();
 
+	
 	public static void main(String[] args) throws IOException {
 		final String IndexServerName = "IndexServer";
 		final int portNumber = Integer.parseInt(args[1]);
@@ -36,6 +37,7 @@ public class Peer {
 		final String FILE_LOC_URL = "" + InetAddress.getLocalHost().getHostAddress() + ":" + listnPeerPort + "/"
 				+ peerName + "";
 
+		
 		Thread peerThread = new Thread(new Runnable() {
 			@Override
 			public void run() {
@@ -112,7 +114,7 @@ public class Peer {
 				}
 
 			}
-
+			
 			public void deregisterFileFromNetwork(IIndexServer serverObject) {
 				System.out.println("Select the file you want to remove from share network");
 				try {
@@ -241,9 +243,9 @@ public class Peer {
 				}
 
 				if (!shareFileList.isEmpty()) {
-					for (int i = 0; i < listFiles.length; i++)
+					for (int i = 0; i < listFiles.length; i++){
 						curFileSet.add(listFiles[i].getName());
-
+					}	
 					Iterator<String> itList = shareFileList.iterator();
 					while (itList.hasNext()) {
 						String oldFileName = itList.next();
@@ -256,7 +258,6 @@ public class Peer {
 							}
 						}
 					}
-
 				}
 				return true;
 			}
@@ -273,7 +274,6 @@ public class Peer {
 						}
 					}
 				}
-
 				return true;
 			}
 
@@ -302,30 +302,60 @@ public class Peer {
 				try {
 					Registry registry = LocateRegistry.getRegistry(peerHost, portNumber);
 					IIndexServer serverObject = (IIndexServer) registry.lookup(IndexServerName);
-
 					if (serverObject != null) {
 						System.out.println("Lookup success. Can talk with server now");
 					}
-
 					while (true) {
 						File[] listFiles = new File(peerName).listFiles();
 						for (int i = 0; i < listFiles.length; i++) {
 							if (listFiles[i].isFile()) {
 								try {
-									serverObject.register(listFiles[i].getName(), FILE_LOC_URL);
+									if (!shareFileList.contains(listFiles[i].getName())) {
+										serverObject.register(listFiles[i].getName(), FILE_LOC_URL);
+										shareFileList.add(listFiles[i].getName());
+									}
 								} catch (RemoteException e) {
 									e.printStackTrace();
-
 								}
 							}
 						}
+						this.autoRmvFlFrmIndexServer(serverObject);
 						Thread.sleep(10000);
 					}
-
 				} catch (Exception e) {
 					System.out.println("Exception in autoupdate directory thread ");
 					e.printStackTrace();
 				}
+			}
+			
+			public boolean autoRmvFlFrmIndexServer(IIndexServer serverObject) {
+				Set<String> curFileSet = new HashSet<>();
+				File[] listFiles = null;
+				try {
+					listFiles = new File(peerName).listFiles();
+				} catch (Exception e) {
+					e.printStackTrace();
+					System.out.println("Error while reading file....");
+				}
+
+				if (!shareFileList.isEmpty()) {
+					for (int i = 0; i < listFiles.length; i++){
+						curFileSet.add(listFiles[i].getName());
+					}	
+					Iterator<String> itList = shareFileList.iterator();
+					while (itList.hasNext()) {
+						String oldFileName = itList.next();
+						if (!curFileSet.contains(oldFileName)) {
+							itList.remove();
+							try {
+								serverObject.deRegister(oldFileName, FILE_LOC_URL);
+							} catch (Exception e) {
+								System.out.println("Error while deregister");
+							}
+						}
+					}
+				}
+				return true;
 			}
 		});
 
